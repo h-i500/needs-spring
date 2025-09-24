@@ -1,0 +1,36 @@
+services:
+  pdf-host:
+    build:
+      context: ./pdf-host
+      dockerfile: Dockerfile
+    image: needs/pdf-host:latest
+    ports:
+      - "10080:10080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:10080/jsprice/sample"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  jsprice-converter:
+    build:
+      context: ./jsprice-converter
+      dockerfile: Dockerfile
+    image: needs/jsprice-converter:latest
+    ports:
+      - "8080:8080"
+    # 生成CSVをホストに残したい場合はマウント
+    volumes:
+      - ./data:/data
+    environment:
+      # ここで application.yml を上書き（コンテナ内は pdf-host で疎通）
+      SPRING_APPLICATION_JSON: >
+        {
+          "app":{
+            "sourceUrl":"http://pdf-host:10080/jsprice/sample",
+            "output":{"dir":"/data/output","filename":"jsprice_20250630.csv"}
+          }
+        }
+    depends_on:
+      pdf-host:
+        condition: service_healthy
