@@ -7,7 +7,7 @@ services:
     ports:
       - "10080:10080"
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:10080/jsprice/sample"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:10080/jsprice/sample"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -19,11 +19,10 @@ services:
     image: needs/jsprice-converter:latest
     ports:
       - "8080:8080"
-    # 生成CSVをホストに残したい場合はマウント
     volumes:
-      - ./data:/data
+      - ./data:/data                 # CSV永続化（ホスト ./data/output に出る）
     environment:
-      # ここで application.yml を上書き（コンテナ内は pdf-host で疎通）
+      # コンテナ間はサービス名で疎通するので pdf-host:10080 を指定
       SPRING_APPLICATION_JSON: >
         {
           "app":{
