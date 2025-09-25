@@ -14,6 +14,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 10
+    networks: [needs-net]
 
   jsprice-converter:
     build:
@@ -37,6 +38,7 @@ services:
     depends_on:
       pdf-host:
         condition: service_healthy
+    networks: [needs-net]
 
   csv-postprocessor:
     build:
@@ -62,3 +64,9 @@ services:
       jsprice-converter:
         condition: service_started
     restart: unless-stopped
+    networks: [needs-net]
+
+
+networks:
+  needs-net:
+    driver: bridge
