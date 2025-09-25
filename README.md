@@ -11,7 +11,7 @@ PDF → CSV 変換（`jsprice-converter`）と、CSV → TXT 変換（`csv-postp
 ```
 .
 ├─ pdf-host/            # サンプルPDFを配信する簡易HTTPサーバ (10081)
-├─ jsprice-converter/   # PDFを取得してCSVへ変換する Spring Boot + Camel アプリ (8080)
+├─ jsprice-converter/   # PDFを取得してCSVへ変換する Spring Boot + Camel アプリ (10080)
 ├─ csv-postprocessor/   # CSVを監視しTXTへ変換する Spring Boot + Camel アプリ
 ├─ data/                # 共有ボリューム (出力や退避ファイルがここに生成される)
 └─ docker-compose.yml
@@ -50,7 +50,7 @@ docker logs -f needs-spring-csv-postprocessor-1
 `jsprice-converter` は手動APIでも起動できます。
 
 ```bash
-curl -X POST http://localhost:8080/run
+curl -X POST http://localhost:10080/run
 ```
 
 成功すると、`data/output/jsprice_YYYYMMDD.csv` が生成され、続いて `csv-postprocessor` が `data/txt/` に `.txt` を出力します。
@@ -126,7 +126,7 @@ services:
 
   jsprice-converter:
     build: { context: ./jsprice-converter, dockerfile: Dockerfile }
-    ports: ["8080:8080"]
+    ports: ["10080:10080"]
     volumes: ["./data:/data"]
     environment:
       - SPRING_APPLICATION_JSON={

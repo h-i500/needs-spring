@@ -8,7 +8,7 @@ management:
       exposure:
         include: health,info
 server:
-  port: 8081  # 任意（別ポート）
+  port: 10082
 
 camel:
   springboot:

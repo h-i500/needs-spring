@@ -4,6 +4,9 @@ services:
       context: ./pdf-host
       dockerfile: Dockerfile
     image: needs/pdf-host:latest
+    environment:
+      SPRING_APPLICATION_JSON: |
+        { "server": { "port": 10081 } }
     ports:
       - "10081:10081"
     healthcheck:
@@ -18,19 +21,19 @@ services:
       dockerfile: Dockerfile
     image: needs/jsprice-converter:latest
     ports:
-      - "8080:8080"
+      - "10080:10080"   # ← ホスト10080で公開
     volumes:
-      - ./data:/data                 # CSV永続化（ホスト ./data/output に出る）
+      - ./data:/data
     environment:
-      # コンテナ間はサービス名で疎通するので pdf-host:10081 を指定
       SPRING_APPLICATION_JSON: |
         {
+          "server": { "port": 10080 },
           "app": {
             "sourceUrl": "http://pdf-host:10081/jsprice/sample",
             "output": { "dir": "/data/output", "filename": "jsprice_20250630.csv" }
           }
         }
-      APP_DEBUG_EVERYMINUTE: "true"   # 毎分トリガー（DebugEveryMinuteRoute）を有効化
+      APP_DEBUG_EVERYMINUTE: "true"
     depends_on:
       pdf-host:
         condition: service_healthy
@@ -43,17 +46,18 @@ services:
     environment:
       SPRING_APPLICATION_JSON: |
         {
+          "server": { "port": 10082 },
           "app": {
             "inDir": "/data/output",
             "outDir": "/data/txt",
             "replaceCommaWithTab": true
           },
-          "server": { "port": 8081 }
+          "camel": { "springboot": { "main-run-controller": true } }
         }
     volumes:
-      - ./data:/data       # 同じボリュームを共有
+      - ./data:/data
     ports:
-      - "8081:8081"        # 任意（動作確認用）
+      - "10082:10082"   # ← ホスト10082で公開
     depends_on:
       jsprice-converter:
         condition: service_started

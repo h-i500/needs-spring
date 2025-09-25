@@ -15,7 +15,7 @@ public class RunController {
     this.template = template;
   }
 
-  // ワンショット実行: curl -X POST http://localhost:8080/run
+  // ワンショット実行: curl -X POST http://localhost:10080/run
   @PostMapping("/run")
   public ResponseEntity<String> run() {
     template.sendBody("direct:run", null);
