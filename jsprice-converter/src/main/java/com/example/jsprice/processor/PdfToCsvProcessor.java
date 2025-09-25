@@ -6,40 +6,53 @@ import org.apache.camel.Processor;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.text.PDFTextStripper;
 
-import java.io.*;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.StringReader;
+import java.io.StringWriter;
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
-// import java.text.ParseException; // ← 削除
 import java.util.ArrayList;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * サンプルPDF（日経NEEDS JS Price）の本文テキストから
- * 「銘柄名  償還日  表面利率  債券標準価格」を抽出してCSVを生成。
- *
- * 出力列: as_of_date, brand, maturity_date, coupon_pct, price_jpy
+ * JS Price PDF から「銘柄名, 償還日, 表面利率, 債券標準価格」を抽出してCSV化
+ * - ページ見出し（償還日/表面利率/債券標準価格/銘柄名…）は除去
+ * - 1行に複数銘柄が連結されたケースを銘柄の“きっかけ語”で分割
+ * - 表面利率が空欄の銘柄も許容（空文字で出力）
+ * 出力列: brand, maturity_date, coupon_pct, price_jpy
  */
 public class PdfToCsvProcessor implements Processor {
 
-  // 行抽出（銘柄行）
-  // 例: "第１０回 利付国債（３０年） 2033/3/20 1.1 99.2936"
-//   private static final Pattern ROW = Pattern.compile(
-//       "^(?<brand>.+?)\\s+(?<date>\\d{4}/\\d{1,2}/\\d{1,2})\\s+(?<coupon>[\\d\\.]+)\\s+(?<price>[\\d\\.]+)\\s*$");
+  /** ページ見出し（各ページ上部の項目名）を除去 */
+  private static final Pattern HEADER_CHUNK = Pattern.compile(
+      "償還日\\s+表面利率\\s+債券標準価格\\s+銘柄名\\s+（年・月・日）\\s+（％）\\s+（円）\\s*"
+  );
 
-    // 新: スラッシュ前後の空白許容、カンマ区切り・小数も許容
-    private static final Pattern ROW = Pattern.compile(
-    "^(?<brand>.+?)\\s+" +
-    "(?<date>\\d{4}\\s*/\\s*\\d{1,2}\\s*/\\s*\\d{1,2})\\s+" +
-    "(?<coupon>[\\d.,]+)\\s+" +
-    "(?<price>[\\d.,]+)\\s*$"
-    );
+  /** 銘柄の“きっかけ語”直前に改行を挿入して、1行複数銘柄を分割 */
+  private static final Pattern BRAND_CUE = Pattern.compile(
+      "(?=第[０-９0-9]+回\\s+利付国債（)|" +                 // 第●回 利付国債（…）
+      "(?=分離利息国債（)|" +                                 // 分離利息国債（…）
+      "(?=第[０-９0-9]+回\\s+物価連動国債（)|" +             // 第●回 物価連動国債（…）
+      "(?=第[０-９0-9]+回\\s+クライメート・トランジション利付国債（)" // 第●回 クライメート・トランジション…
+  );
 
-  // PDFヘッダ等からデータ日付（as-of）を拾う: 例 "2025/06/30"
-  private static final Pattern AS_OF = Pattern.compile(
-        "(20\\d{2})\\s*/\\s*(\\d{1,2})\\s*/\\s*(\\d{1,2})"
-    );
+  /**
+   * 行パターン
+   * brand  ... 改行を跨がない任意文字（できるだけ短く）
+   * date   ... yyyy/m/d（空白混在OK）
+   * coupon ... 任意（無い場合あり）
+   * price  ... 必須
+   * マルチラインで ^/$ を行頭/行末にする
+   */
+  private static final Pattern ROW = Pattern.compile(
+      "^(?<brand>.+?)\\s+" +
+      "(?<date>\\d{4}\\s*/\\s*\\d{1,2}\\s*/\\s*\\d{1,2})" +
+      "(?:\\s+(?<coupon>[\\d.,]+))?\\s+" +
+      "(?<price>[\\d.,]+)\\s*$",
+      Pattern.MULTILINE
+  );
 
   @Override
   public void process(Exchange exchange) throws Exception {
@@ -48,30 +61,17 @@ public class PdfToCsvProcessor implements Processor {
       throw new IllegalArgumentException("No PDF content in exchange body.");
     }
 
-    String allText = extractText(pdf);
+    String text = extractText(pdf);
+    text = cleanup(text); // 見出し除去・分割など前処理
 
-    // 追加: 抽出結果を10行だけ出す
-    int shown = 0;
-    try (BufferedReader dbg = new BufferedReader(new StringReader(allText))) {
-    String L;
-    while ((L = dbg.readLine()) != null && shown < 10) {
-        System.out.println("[DBG] " + L);
-        shown++;
-    }
-    }
+    List<String[]> rows = extractRows(text);
 
-    String asOfDate = findAsOfDate(allText); // "yyyy-MM-dd" or ""
-    List<String[]> rows = extractRows(allText, asOfDate); // ← IOException を上位で拾える
-
-    // CSV 文字列化（UTF-8）
     String csv = toCsvString(rows);
-
-    System.out.println("==== CSV DUMP ====\n" + csv.replace("\r","\\r").replace("\n","\\n\n"));
-
     exchange.getIn().setBody(csv);
     exchange.getIn().setHeader(Exchange.CONTENT_TYPE, "text/csv; charset=UTF-8");
   }
 
+  /** PDF -> テキスト */
   private String extractText(byte[] pdf) throws IOException {
     try (PDDocument doc = PDDocument.load(pdf)) {
       PDFTextStripper stripper = new PDFTextStripper();
@@ -80,77 +80,84 @@ public class PdfToCsvProcessor implements Processor {
     }
   }
 
-  private String findAsOfDate(String text) {
-    Matcher m = AS_OF.matcher(text);
-    if (m.find()) {
-      int y = Integer.parseInt(m.group(1));
-      int mo = Integer.parseInt(m.group(2));
-      int d = Integer.parseInt(m.group(3));
-      return String.format("%04d-%02d-%02d", y, mo, d);
-    }
-    return "";
+  /** テキスト前処理：見出し除去、空白正規化、銘柄の直前に改行を挿入して分割を安定化 */
+  private String cleanup(String text) {
+    String x = text;
+
+    // 見出し塊を除去（複数ページ想定）
+    x = HEADER_CHUNK.matcher(x).replaceAll("");
+
+    // 全角スペース/タブ -> 半角、連続空白を1つに
+    x = x.replace('\u3000', ' ').replace('\t', ' ');
+    x = x.replaceAll(" +", " ");
+
+    // 銘柄の“きっかけ語”直前に改行を「挿入」（消さない！）
+    x = BRAND_CUE.matcher(x).replaceAll("\n$0");
+
+    // 連続改行の整理
+    x = x.replaceAll("\\n{2,}", "\n").trim();
+
+    return x;
   }
 
-
-  // ★ここを IOException にする（ParseException は不要）
-  private List<String[]> extractRows(String text, String asOfDate) throws IOException {
+  /** 全文に対して find() で行を拾う（行単位読み出しはしない） */
+  private List<String[]> extractRows(String text) {
     List<String[]> out = new ArrayList<>();
-    out.add(new String[]{"as_of_date", "brand", "maturity_date", "coupon_pct", "price_jpy"});
+    out.add(new String[]{"brand", "maturity_date", "coupon_pct", "price_jpy"});
 
-    try (BufferedReader br = new BufferedReader(new StringReader(text))) {
-      String line;
-      while ((line = br.readLine()) != null) { // readLine が IOException を投げ得る
-        line = normalize(line);
-        if (line.isEmpty()) continue;
+    Matcher m = ROW.matcher(text);
+    while (m.find()) {
+      String brand  = normalizeBrand(m.group("brand"));
+      String date   = normalizeDate(m.group("date"));
+      String coupon = normalizeDecimalOrEmpty(m.group("coupon")); // 空欄許容
+      String price  = normalizeDecimalOrEmpty(m.group("price"));
 
-        Matcher m = ROW.matcher(line);
-        if (m.find()) {
-          String brand = m.group("brand");
-          String date = normalizeDate(m.group("date"));     // yyyy-MM-dd
-          String coupon = normalizeDecimal(m.group("coupon"));
-          String price = normalizeDecimal(m.group("price"));
-
-          out.add(new String[]{asOfDate, brand, date, coupon, price});
-        }
+      // 念のため：万が一見出し残骸がbrand先頭にあれば落とす
+      if (brand.contains("償還日") && brand.contains("表面利率")) {
+        brand = brand.replaceFirst(".*?（円）\\s*", "");
       }
+
+      out.add(new String[]{brand, date, coupon, price});
     }
     return out;
   }
 
+  /** CSV 文字列化（LF終端） */
   private String toCsvString(List<String[]> rows) throws IOException {
     StringWriter sw = new StringWriter();
-    // 行末 \n 固定（OpenCSV の別コンストラクタ）
-    try (CSVWriter writer = new CSVWriter(sw, CSVWriter.DEFAULT_SEPARATOR, CSVWriter.DEFAULT_QUOTE_CHARACTER,
-                                            CSVWriter.DEFAULT_ESCAPE_CHARACTER, "\n")) {
-        writer.writeAll(rows, false);
+    try (CSVWriter writer = new CSVWriter(
+        sw,
+        CSVWriter.DEFAULT_SEPARATOR,
+        CSVWriter.DEFAULT_QUOTE_CHARACTER,
+        CSVWriter.DEFAULT_ESCAPE_CHARACTER,
+        "\n")) {
+      writer.writeAll(rows, false);
     }
     return sw.toString();
-    }
-
+  }
 
   /* ---------- Normalizers ---------- */
 
-  private String normalize(String s) {
+  private String normalizeBrand(String s) {
     if (s == null) return "";
-    String x = s.replace('\u3000', ' ').replace('\t', ' ');
-    x = x.replaceAll("\\s+", " ").trim();
-    // ノイズ判定は今は何もしない（必要ならここで continue 等のロジックを実装）
-    // if (x.matches("(?i).*(nikkei|copyright|page|債券標準価格|表面利率).*")) { }
+    String x = s.trim();
+    x = x.replaceAll("\\s+", " ");
     return x;
   }
 
   private String normalizeDate(String yyyyMd) {
     String compact = yyyyMd.replaceAll("\\s+", ""); // "2033 / 3 / 20" → "2033/3/20"
-    String[] p = compact.split("/");                // ← ここを compact に
+    String[] p = compact.split("/");
     return String.format("%04d-%02d-%02d",
         Integer.parseInt(p[0]),
         Integer.parseInt(p[1]),
         Integer.parseInt(p[2]));
-    }
+  }
 
-  private String normalizeDecimal(String s) {
+  /** 数値 or 空文字（null/空はそのまま空） */
+  private String normalizeDecimalOrEmpty(String s) {
+    if (s == null || s.isBlank()) return "";
     String z = s.replace(",", "");
-    BigDecimal bd = new BigDecimal(z);
-    return bd.stripTrailingZeros().toPlainString();
+    return new BigDecimal(z).stripTrailingZeros().toPlainString();
   }
 }
