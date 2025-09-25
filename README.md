@@ -1,233 +1,219 @@
 
-
 ---
 
 # needs-spring
 
-**日経 NEEDS JS Price（サンプルPDF）を取得→CSVに変換**する PoC。
-アプリは 2 サービス構成です。
+Apache Camel × Spring Boot で作る日経 NEEDS（JS PRICE）処理パイプラインのサンプル。
+PDF → CSV 変換（`jsprice-converter`）と、CSV → TXT 変換（`csv-postprocessor`）を **Docker Compose** で連携させます。
 
-* **pdf-host** : サンプル PDF を配信（`http://localhost:10080/jsprice/sample`）
-* **jsprice-converter** : PDF を取得し、本文から「銘柄名 / 償還日 / 表面利率 / 債券標準価格」を抽出して CSV を生成
-
-Spring Boot + Apache Camel（HTTP 取得＆ファイル出力）。OpenCSV / PDFBox を使用。
-
----
-
-## 目次
-
-* [ディレクトリ構成](#ディレクトリ構成)
-* [前提](#前提)
-* [クイックスタート（Docker Compose）](#クイックスタートdocker-compose)
-* [ローカル起動（Docker 不使用）](#ローカル起動docker-不使用)
-* [エンドポイント](#エンドポイント)
-* [出力CSVの仕様](#出力csvの仕様)
-* [設定方法](#設定方法)
-* [テスト](#テスト)
-* [トラブルシュート](#トラブルシュート)
-* [今後の拡張案](#今後の拡張案)
-* [ライセンス](#ライセンス)
-
----
-
-## ディレクトリ構成
+## 構成
 
 ```
-needs-spring/
-├── docker-compose.yml
-├── data/                     # 生成CSV永続化（コンテナ起動時に ./data を /data にマウント）
-│   └── output/               # CSV 出力先（例: jsprice_20250630.csv）
-├── jsprice-converter/        # 変換アプリ（Spring Boot + Camel）
-│   ├── Dockerfile
-│   ├── pom.xml
-│   └── src/
-└── pdf-host/                 # PDF 配信アプリ（Spring Boot）
-    ├── Dockerfile
-    ├── pom.xml
-    └── src/
-        └── main/resources/sample/jsprice_01_202506.pdf  # ← サンプルPDF
+.
+├─ pdf-host/            # サンプルPDFを配信する簡易HTTPサーバ (10080)
+├─ jsprice-converter/   # PDFを取得してCSVへ変換する Spring Boot + Camel アプリ (8080)
+├─ csv-postprocessor/   # CSVを監視しTXTへ変換する Spring Boot + Camel アプリ
+├─ data/                # 共有ボリューム (出力や退避ファイルがここに生成される)
+└─ docker-compose.yml
 ```
 
-> **注意**: `pdf-host/src/main/resources/sample/jsprice_01_202506.pdf` がないと PDF が配信できません。
+### データフロー
+
+1. `jsprice-converter` が `pdf-host` から PDF をダウンロード
+2. `PdfToCsvProcessor` で CSV を生成し **`/data/output`** に出力
+3. `csv-postprocessor` が **`/data/output`** をポーリングし、CSV をTXTへ変換して **`/data/txt`** に出力
+
+   * 処理済みCSVは `/data/output/.done/` へ移動
 
 ---
 
-## 前提
+## クイックスタート
 
-* Docker / Docker Compose が利用可能
-* JDK 17+ / Maven 3.9+（ローカル実行・開発時）
-* ポート未使用: `8080`（converter）, `10080`（pdf-host）
-
----
-
-## クイックスタート（Docker Compose）
-
-1. （初回のみ）`pdf-host/src/main/resources/sample/` にサンプル PDF を配置
-   ファイル名: `jsprice_01_202506.pdf`
-
-2. ビルド & 起動
-
-   ```bash
-   docker compose up --build -d
-   ```
-
-3. 動作確認（PDF 配信）
-
-   ```bash
-   curl -v http://localhost:10080/jsprice/sample -o /dev/null
-   # HTTP/1.1 200 & Content-Type: application/pdf が返ればOK
-   ```
-
-4. 変換トリガ
-
-   ```bash
-   curl -X POST http://localhost:8080/run
-   # → "OK" が返る
-   ```
-
-5. 出力確認
-
-   ```bash
-   cat ./data/output/jsprice_20250630.csv
-   ```
-
-> Compose 内ではサービス名で相互接続します。converter → pdf-host への取得 URL は
-> `http://pdf-host:10080/jsprice/sample` です（`docker-compose.yml` の `SPRING_APPLICATION_JSON` で設定）。
-
----
-
-## ローカル起動（Docker 不使用）
-
-### A. pdf-host（10080）を起動
+### 1) ビルド & 起動
 
 ```bash
-cd pdf-host
-mvn -q -DskipTests package
-java -jar target/pdf-host-0.0.1-SNAPSHOT.jar
-# http://localhost:10080/jsprice/sample でPDFが返ることを確認
+# ルート (needs-spring/) で実行
+docker compose up --build -d
 ```
 
-### B. jsprice-converter（8080）を起動
-
-`jsprice-converter/src/main/resources/application.yml` の `app.sourceUrl` を `http://localhost:10080/jsprice/sample` にしてから:
+起動後、ログを確認：
 
 ```bash
-cd jsprice-converter
-mvn -q -DskipTests package
-java -jar target/jsprice-converter-0.0.1-SNAPSHOT.jar
+docker logs -f needs-spring-jsprice-converter-1
+docker logs -f needs-spring-csv-postprocessor-1
 ```
 
-### C. 変換トリガ
+`jsprice-converter` の起動時ログに Quartz のスケジュールが出ます（例：`Next fire date is ...`）。
+
+### 2) 手動実行（HTTP）
+
+`jsprice-converter` は手動APIでも起動できます。
 
 ```bash
 curl -X POST http://localhost:8080/run
-cat ./data/output/jsprice_20250630.csv
 ```
 
----
-
-## エンドポイント
-
-### pdf-host
-
-* `GET /jsprice/sample`
-  クラスパス上の `sample/jsprice_01_202506.pdf` を返却（`application/pdf`）
-
-### jsprice-converter
-
-* `POST /run`
-  `app.sourceUrl` から PDF を取得 → 解析 → CSV を `/data/output`（コンテナ）へ保存
-  成功時: `"OK"` を返却
+成功すると、`data/output/jsprice_YYYYMMDD.csv` が生成され、続いて `csv-postprocessor` が `data/txt/` に `.txt` を出力します。
 
 ---
 
-## 出力CSVの仕様
+## スケジューリング
 
-* ヘッダ:
+### 毎週月曜 10:00（日本時間）
 
-  ```
-  as_of_date,brand,maturity_date,coupon_pct,price_jpy
-  ```
-* 行例:
+`jsprice-converter` には Quartz ルートがあり、**毎週月曜 10:00 JST** に自動実行されます。
 
-  ```
-  2025-06-30,第１０回 利付国債（３０年）,2033-03-20,1.1,99.2936
-  ```
-* 文字コード: UTF-8（改行 LF）
-* 数値: カンマ削除・小数点維持（`BigDecimal.stripTrailingZeros()`）
+* ルート: `WeeklySchedulerRoute`
+* エンドポイント: `quartz://weekly/monday10?cron=0+0+10+?+*+MON&trigger.timeZone=Asia/Tokyo`
+* 実行内容: `direct:runJob` を呼び出し、PDF→CSV を実施
 
----
+#### デバッグ用：毎分トリガ（任意）
 
-## 設定方法
-
-### 環境変数で上書き（推奨）
-
-`docker-compose.yml` にて `SPRING_APPLICATION_JSON` で上書きしています。
-
-```json
-{
-  "app": {
-    "sourceUrl": "http://pdf-host:10080/jsprice/sample",
-    "output": { "dir": "/data/output", "filename": "jsprice_20250630.csv" }
-  }
-}
-```
-
-### `application.yml` で指定（ローカル起動時など）
-
-`jsprice-converter/src/main/resources/application.yml`
+環境変数 `APP_DEBUG_EVERYMINUTE=true` を与えると、別ルート（`EveryMinuteDebugRoute`）が有効になり**毎分**実行されます。
+`docker-compose.yml` の `jsprice-converter` に以下の環境変数を設定済みです（必要に応じて外してください）。
 
 ```yaml
-server:
-  port: 8080
-
-app:
-  sourceUrl: "http://localhost:10080/jsprice/sample"
-  output:
-    dir: "data/output"
-    filename: "jsprice_20250630.csv"
+environment:
+  - APP_DEBUG_EVERYMINUTE=true
 ```
-
-> Excel 連携のため Shift\_JIS で出力したい場合は Camel の file エンドポイントに
-> `&charset=MS932` を付与するなどで対応可能です。
 
 ---
 
-## テスト
+## `csv-postprocessor` の動作
 
-ユニットテスト（PDFBox を用いた ASCII 簡易PDFで検証）:
+* 監視ディレクトリ: `/data/output`
+* 出力ディレクトリ: `/data/txt`
+* ポーリング方式: Camel file コンポーネントの**定期ポーリング**（デフォルト約 500ms）
+* 代表ルート: `csv-to-txt`
+
+  * `readLock=changed` で書き込み完了まで待機
+  * `idempotent=true` で同一ファイルの二重処理を防止
+  * 処理後は `move=.done/${file:name}` で入力側を退避
+
+### 区切り文字の変換（任意）
+
+`application.yml` の `app.replaceCommaWithTab` を `true` にすると、CSV のカンマをタブへ置換して出力します。
+
+```yaml
+app:
+  inDir: /data/output
+  outDir: /data/txt
+  replaceCommaWithTab: true
+camel:
+  springboot:
+    main-run-controller: true  # ← サービス常駐のため必須
+```
+
+> **常駐設定について**
+> `csv-postprocessor` は Web を持たないため、`camel.springboot.main-run-controller=true` を必ず有効化してください。これが無いと起動直後に CamelContext が終了してしまいます。
+
+---
+
+## 設定
+
+### docker-compose（抜粋）
+
+```yaml
+services:
+  pdf-host:
+    build: { context: ./pdf-host, dockerfile: Dockerfile }
+    ports: ["10080:10080"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:10080/jsprice/sample"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  jsprice-converter:
+    build: { context: ./jsprice-converter, dockerfile: Dockerfile }
+    ports: ["8080:8080"]
+    volumes: ["./data:/data"]
+    environment:
+      - SPRING_APPLICATION_JSON={
+          "app":{"sourceUrl":"http://pdf-host:10080/jsprice/sample",
+                 "output":{"dir":"/data/output","filename":"jsprice_20250630.csv"}}
+        }
+      - APP_DEBUG_EVERYMINUTE=true
+    depends_on:
+      pdf-host: { condition: service_healthy }
+
+  csv-postprocessor:
+    build: { context: ./csv-postprocessor, dockerfile: Dockerfile }
+    volumes: ["./data:/data"]
+    environment:
+      - SPRING_PROFILES_ACTIVE=prod   # 必要なら
+    depends_on:
+      - jsprice-converter
+```
+
+---
+
+## API
+
+### `POST /run`（`jsprice-converter`）
+
+* 説明: 即時で PDF→CSV のジョブを実行
+* レスポンス: 実行ログ / ファイル出力は `data/output/` を確認
+
+---
+
+## ビルド & テスト（ローカル）
+
+### Maven
 
 ```bash
-cd jsprice-converter
-mvn -DskipTests=false -Dtest=PdfToCsvProcessorTest test
+# ルート（needs-spring/）で実行
+mvn -q -DskipTests package
+
+# テスト実行
+mvn -q -DskipTests=false test
 ```
+
+**テスト内容:**
+
+* `PdfToCsvProcessorTest` … PDF からの表抽出の単体テスト
+* ルート結線テスト（`RoutesWiringTest`, `SchedulerRouteTest`）
+
+  * Camel の `AdviceWith` と `camel-test-spring-junit5` を使用
+  * 外部I/O（HTTP/file）を `mock:` に差し替えて動作検証
 
 ---
 
 ## トラブルシュート
 
-* **`/run` が 500 を返す**
+* **本番起動で `MockComponent` の `ClassNotFoundException`**
+  → *原因*: `camel-mock` / `camel-dataset` などの **テスト用依存**が実行イメージに混入
+  → *対策*: POM のテスト依存は必ず `<scope>test</scope>` を付ける。`docker compose up --build` で再ビルド。
 
-  * `docker compose logs jsprice-converter` でスタックトレースを確認
-  * `pdf-host` が起動していない / `sourceUrl` が不正 / サンプル PDF 未配置 等
-* **Compose が変換側を待ち続ける**
+* **`csv-postprocessor` がすぐ終了する**
+  → `camel.springboot.main-run-controller=true` が無効。`application.yml` に追加のうえ再ビルド。
 
-  * `pdf-host` のヘルスチェックが失敗している可能性
-    → runtime イメージに `curl` を入れるか、`healthcheck` を外す
-* **CSV が出力されない**
-
-  * 出力先ディレクトリの権限 / マウント設定を確認
-    （ホスト `./data` がコンテナ `/data` にマウントされます）
+* **PDF が取得できない / 404**
+  → `pdf-host` のヘルスチェックを確認。`docker logs -f needs-spring-pdf-host-1` で疎通とパス `/jsprice/sample` を確認。
 
 ---
 
-## 今後の拡張案
+## カスタマイズ
 
-* 複数 PDF バッチ処理（ディレクトリ監視 / S3 取り込み）
-* レイアウト崩れ時のフォールバック（Tabula 連携など）
-* 解析ロジックの高度化（列推定 / ノイズ行除外 / 全角→半角 正規化）
-* スケジューラ起動（cron 風 / Camel Timer）
-* Basic 認証や署名検証（pdf-host 側）
+* **スケジュール変更**
+  `WeeklySchedulerRoute` の `cron` を変更。JST のまま運用する場合は `trigger.timeZone=Asia/Tokyo` を維持。
+
+* **出力先やファイル名**
+  `SPRING_APPLICATION_JSON` の `app.output.dir` / `filename` を変更。
+  `csv-postprocessor` 側は `application.yml` の `app.inDir` / `outDir` を合わせて変更。
+
+* **ポーリング間隔**（`csv-postprocessor`）
+  file コンポーネント URI に `&delay=5000&initialDelay=2000&readLockMinAge=1000` などを追加して調整。
+
 
 ---
 
+### 変更提案の要点
+
+* 2つのサービスの役割とデータフローを明確化
+* 手動APIと定時実行の両方をすぐ試せる手順
+* `csv-postprocessor` が落ちる問題の恒久対策（`main-run-controller=true`）を README に明記
+* デバッグ用の毎分トリガの切り替えをドキュメント化
+* よくある罠（Mock依存の混入）と対処を追記
+
+---
