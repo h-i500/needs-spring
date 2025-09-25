@@ -1,0 +1,19 @@
+app:
+  inDir: /data/output     # jsprice-converter の出力
+  outDir: /data/txt       # 本コンテナの出力
+  replaceCommaWithTab: true  # 必要なら true でTSVへ
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+server:
+  port: 8081  # 任意（別ポート）
+
+camel:
+  springboot:
+    main-run-controller: true
+
+logging:
+  level:
+    org.apache.camel.spring.boot: DEBUG   # 読めているかデバッグ用（任意）

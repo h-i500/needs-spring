@@ -25,26 +25,28 @@ public class Routes extends RouteBuilder {
     onException(Exception.class)
       .handled(true)
       .log("Processing failed: ${exception.message}")
-      // 失敗した入力を退避（PDF本文やCSV本文がBodyに入っている段階で拾います）
       .process(e -> {
         Object body = e.getIn().getBody();
         if (body != null) {
-          e.getIn().setHeader(Exchange.FILE_NAME, e.getProperty(Exchange.EXCEPTION_CAUGHT, Exception.class) != null
-              ? "failed_" + System.currentTimeMillis() + ".bin"
-              : "failed.bin");
+          e.getIn().setHeader(Exchange.FILE_NAME,
+              "failed_" + System.currentTimeMillis() + ".bin");
         }
       })
       .to("file:data/error")
       .setBody(simple("ERROR: ${exception.message}"))
       .to("log:jsprice-error?level=ERROR");
 
-    // 手動起動ルート（RunController から叩く）
+    // 互換: 既存の direct:run 呼び出しがあれば runJob にフォワード
     from("direct:run")
-      .routeId("jsprice-extract")
+      .routeId("compat-direct-run")
+      .to("direct:runJob");
+
+    // 実処理本体：手動・定期どちらもここを通る
+    from("direct:runJob")
+      .routeId("jsprice-runJob")
       .setHeader("outputDir", simple(outputDir))
       .setHeader("outputFileName", simple(outputFileName))
       .log("Downloading PDF from: " + sourceUrl)
-      // camel-http コンポーネントを使用（httpsスキームでOK）
       .toD("{{app.sourceUrl}}?bridgeEndpoint=true")
       .process(new PdfToCsvProcessor())
       .log("Writing CSV to: ${header.outputDir}/${header.outputFileName}")

@@ -23,13 +23,38 @@ services:
       - ./data:/data                 # CSV永続化（ホスト ./data/output に出る）
     environment:
       # コンテナ間はサービス名で疎通するので pdf-host:10080 を指定
-      SPRING_APPLICATION_JSON: >
+      SPRING_APPLICATION_JSON: |
         {
-          "app":{
-            "sourceUrl":"http://pdf-host:10080/jsprice/sample",
-            "output":{"dir":"/data/output","filename":"jsprice_20250630.csv"}
+          "app": {
+            "sourceUrl": "http://pdf-host:10080/jsprice/sample",
+            "output": { "dir": "/data/output", "filename": "jsprice_20250630.csv" }
           }
         }
+      APP_DEBUG_EVERYMINUTE: "true"   # 毎分トリガー（DebugEveryMinuteRoute）を有効化
     depends_on:
       pdf-host:
         condition: service_healthy
+
+  csv-postprocessor:
+    build:
+      context: ./csv-postprocessor
+      dockerfile: Dockerfile
+    image: needs/csv-postprocessor:latest
+    environment:
+      SPRING_APPLICATION_JSON: |
+        {
+          "app": {
+            "inDir": "/data/output",
+            "outDir": "/data/txt",
+            "replaceCommaWithTab": true
+          },
+          "server": { "port": 8081 }
+        }
+    volumes:
+      - ./data:/data       # 同じボリュームを共有
+    ports:
+      - "8081:8081"        # 任意（動作確認用）
+    depends_on:
+      jsprice-converter:
+        condition: service_started
+    restart: unless-stopped

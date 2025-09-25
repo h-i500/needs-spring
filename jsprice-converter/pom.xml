@@ -1,7 +1,6 @@
 <project xmlns="http://maven.apache.org/POM/4.0.0"
          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
-                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>com.example</groupId>
@@ -19,6 +18,7 @@
     <maven.compiler.release>${java.version}</maven.compiler.release>
   </properties>
 
+  <!-- ★ 依存バージョンの基準：Boot と Camel(SB) の BOM を取り込む -->
   <dependencyManagement>
     <dependencies>
       <dependency>
@@ -28,9 +28,11 @@
         <type>pom</type>
         <scope>import</scope>
       </dependency>
+
+      <!-- ★ Camel Spring Boot 用の BOM（これが camel-bom も内包） -->
       <dependency>
-        <groupId>org.apache.camel</groupId>
-        <artifactId>camel-bom</artifactId>
+        <groupId>org.apache.camel.springboot</groupId>
+        <artifactId>camel-spring-boot-dependencies</artifactId>
         <version>${camel.version}</version>
         <type>pom</type>
         <scope>import</scope>
@@ -49,11 +51,10 @@
       <artifactId>spring-boot-starter-web</artifactId>
     </dependency>
 
-    <!-- Apache Camel -->
+    <!-- Apache Camel (★ version 指定不要：BOM が管理) -->
     <dependency>
       <groupId>org.apache.camel.springboot</groupId>
       <artifactId>camel-spring-boot-starter</artifactId>
-      <version>${camel.version}</version>
     </dependency>
     <dependency>
       <groupId>org.apache.camel</groupId>
@@ -64,7 +65,13 @@
       <artifactId>camel-file</artifactId>
     </dependency>
 
-    <!-- PDF / CSV -->
+    <!-- Camel Quartz (cron スケジューラ) -->
+    <dependency>
+      <groupId>org.apache.camel.springboot</groupId>
+      <artifactId>camel-quartz-starter</artifactId>
+    </dependency>
+
+    <!-- PDF / CSV（これらは外部なので個別版を維持） -->
     <dependency>
       <groupId>org.apache.pdfbox</groupId>
       <artifactId>pdfbox</artifactId>
@@ -82,9 +89,30 @@
       <artifactId>spring-boot-starter-test</artifactId>
       <scope>test</scope>
     </dependency>
+
+    <!-- Camel テスト（core + Spring Boot JUnit5）-->
     <dependency>
       <groupId>org.apache.camel</groupId>
       <artifactId>camel-test-junit5</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <!-- <dependency>
+      <groupId>org.apache.camel.springboot</groupId>
+      <artifactId>camel-test-spring-junit5</artifactId>
+      <version>${camel.version}</version>
+      <scope>test</scope>
+    </dependency> -->
+    <dependency>
+      <groupId>org.apache.camel</groupId>
+      <artifactId>camel-test-spring-junit5</artifactId>
+      <version>${camel.version}</version>
+      <scope>test</scope>
+    </dependency>
+
+    <!-- 任意：camel-mock（BOM管理下） -->
+    <dependency>
+      <groupId>org.apache.camel</groupId>
+      <artifactId>camel-mock</artifactId>
       <scope>test</scope>
     </dependency>
   </dependencies>
@@ -92,27 +120,26 @@
   <build>
     <plugins>
       <plugin>
-        <groupId>org.springframework.boot</groupId>
-        <artifactId>spring-boot-maven-plugin</artifactId>
-      </plugin>
-      <plugin>
         <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.11.0</version>
         <configuration>
           <release>${maven.compiler.release}</release>
         </configuration>
       </plugin>
-        <plugin>
-            <groupId>org.springframework.boot</groupId>
-            <artifactId>spring-boot-maven-plugin</artifactId>
-            <version>3.2.5</version> <!-- Spring Boot のバージョンに合わせる -->
-            <executions>
-                <execution>
-                <goals>
-                    <goal>repackage</goal>
-                </goals>
-                </execution>
-            </executions>
-        </plugin>
+
+      <!-- ★ plugin の version 警告を消す -->
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <version>${spring-boot.version}</version>
+        <executions>
+          <execution>
+            <goals>
+              <goal>repackage</goal>
+            </goals>
+          </execution>
+        </executions>
+      </plugin>
     </plugins>
   </build>
 </project>
