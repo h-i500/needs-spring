@@ -5,9 +5,9 @@ services:
       dockerfile: Dockerfile
     image: needs/pdf-host:latest
     ports:
-      - "10080:10080"
+      - "10081:10081"
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:10080/jsprice/sample"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:10081/jsprice/sample"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -22,11 +22,11 @@ services:
     volumes:
       - ./data:/data                 # CSV永続化（ホスト ./data/output に出る）
     environment:
-      # コンテナ間はサービス名で疎通するので pdf-host:10080 を指定
+      # コンテナ間はサービス名で疎通するので pdf-host:10081 を指定
       SPRING_APPLICATION_JSON: |
         {
           "app": {
-            "sourceUrl": "http://pdf-host:10080/jsprice/sample",
+            "sourceUrl": "http://pdf-host:10081/jsprice/sample",
             "output": { "dir": "/data/output", "filename": "jsprice_20250630.csv" }
           }
         }

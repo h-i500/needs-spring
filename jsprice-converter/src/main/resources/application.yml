@@ -4,7 +4,7 @@ server:
 # サンプルPDF（NEEDS JS Price）
 app:
   # sourceUrl: "https://needs.nikkei.co.jp/wp-content/uploads/2025/07/jsprice_01_202506.pdf"
-  sourceUrl: "http://localhost:10080/jsprice/sample"
+  sourceUrl: "http://localhost:10081/jsprice/sample"
   output:
     dir: "data/output"
     filename: "jsprice_20250630.csv"

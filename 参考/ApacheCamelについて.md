@@ -10,7 +10,7 @@
 
 * **コンポーネント利用**
 
-  * `camel-http`：`app.sourceUrl`（compose では `http://pdf-host:10080/...`）から PDF を取得。
+  * `camel-http`：`app.sourceUrl`（compose では `http://pdf-host:10081/...`）から PDF を取得。
   * `camel-file`：`/data/output/…csv` に保存（エラーファイル先も指定可）。
   * `bean/processor`：`PdfToCsvProcessor` を挟み、**ボディを CSV 文字列に変換**。
 

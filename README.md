@@ -10,7 +10,7 @@ PDF → CSV 変換（`jsprice-converter`）と、CSV → TXT 変換（`csv-postp
 
 ```
 .
-├─ pdf-host/            # サンプルPDFを配信する簡易HTTPサーバ (10080)
+├─ pdf-host/            # サンプルPDFを配信する簡易HTTPサーバ (10081)
 ├─ jsprice-converter/   # PDFを取得してCSVへ変換する Spring Boot + Camel アプリ (8080)
 ├─ csv-postprocessor/   # CSVを監視しTXTへ変換する Spring Boot + Camel アプリ
 ├─ data/                # 共有ボリューム (出力や退避ファイルがここに生成される)
@@ -117,9 +117,9 @@ camel:
 services:
   pdf-host:
     build: { context: ./pdf-host, dockerfile: Dockerfile }
-    ports: ["10080:10080"]
+    ports: ["10081:10081"]
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:10080/jsprice/sample"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:10081/jsprice/sample"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -130,7 +130,7 @@ services:
     volumes: ["./data:/data"]
     environment:
       - SPRING_APPLICATION_JSON={
-          "app":{"sourceUrl":"http://pdf-host:10080/jsprice/sample",
+          "app":{"sourceUrl":"http://pdf-host:10081/jsprice/sample",
                  "output":{"dir":"/data/output","filename":"jsprice_20250630.csv"}}
         }
       - APP_DEBUG_EVERYMINUTE=true
