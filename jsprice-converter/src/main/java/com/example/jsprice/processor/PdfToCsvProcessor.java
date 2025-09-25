@@ -65,7 +65,7 @@ public class PdfToCsvProcessor implements Processor {
     text = cleanup(text); // 見出し除去・分割など前処理
 
     List<String[]> rows = extractRows(text);
-
+    // rows = uniqueRows(rows);  // 重複除去したい場合はコメントアウト解除
     String csv = toCsvString(rows);
     exchange.getIn().setBody(csv);
     exchange.getIn().setHeader(Exchange.CONTENT_TYPE, "text/csv; charset=UTF-8");
@@ -160,4 +160,20 @@ public class PdfToCsvProcessor implements Processor {
     String z = s.replace(",", "");
     return new BigDecimal(z).stripTrailingZeros().toPlainString();
   }
+
+  // /** 重複除去したい場合はコメントアウト解除 **/
+  // private List<String[]> uniqueRows(List<String[]> rows) {
+  //   if (rows.isEmpty()) return rows;
+  //   List<String[]> out = new ArrayList<>();
+  //   out.add(rows.get(0)); // ヘッダはそのまま
+
+  //   java.util.HashSet<String> seen = new java.util.HashSet<>();
+  //   for (int i = 1; i < rows.size(); i++) {
+  //     String[] r = rows.get(i);
+  //     // brand, date, coupon, price の完全一致でユニーク化
+  //     String key = String.join("\u0001", r);
+  //     if (seen.add(key)) out.add(r);
+  //   }
+  //   return out;
+  // }
 }
